@@ -5,9 +5,12 @@ use std::{
     thread,
 };
 
+// use tokio::task::JoinSet;
+
 /// Reads an ordered list of words from stdin and prints the determined
 /// character sort order
-fn main() {
+#[tokio::main]
+async fn main() {
     let words = read_words(stdin().lock()).expect("read words");
     // println!("{:?}", words);
     println!("{:?}", lexical_order(&words).expect("sorted"));
@@ -121,38 +124,37 @@ fn adjacency(indexed: &[Vec<usize>], dim: usize) -> Vec<Vec<usize>> {
 /// Returns max-plus product of the given distance matrix
 fn maxplus(dist: &[Vec<usize>]) -> Vec<Vec<usize>> {
     let dim = dist.len();
-    let mut prod = vec![vec![0; dim]; dim];
+    // let mut prod = vec![vec![0; dim]; dim];
     let num_chunks = thread::available_parallelism().unwrap().get();
     let chunk_size = (dim + num_chunks - 1) / num_chunks;
-    // var wg sync.WaitGroup
+    // let mut set = JoinSet::<Vec<(usize, Vec<usize>)>>::new();
+    let mut rows = Vec::with_capacity(dim);
     for i in (0..dim).step_by(chunk_size) {
-        let end = min(i + chunk_size, dim);
-        // wg.Add(1)
-        (|m, n| {
-            for i in m..n {
-                prod[i] = maxplus_row(dist, i);
-            }
-            // wg.Done()
-        })(i, end)
+        let j = min(i + chunk_size, dim);
+        for k in i..j {
+            rows.push((k, maxplus_row(dist, k)));
+        }
     }
-    // wg.Wait()
+    let mut prod = vec![vec![0; dim]; dim]; // TODO
+    // while let Some(res) = set.join_next().await { }
+    rows.into_iter().for_each(|p| prod[p.0] = p.1);
     prod
 }
 
 /// Returns one row of the max-plus product of the given distance matrix
-fn maxplus_row(dist: &[Vec<usize>], i: usize) -> Vec<usize> {
+fn maxplus_row(dist: &[Vec<usize>], index: usize) -> Vec<usize> {
     let dim = dist.len();
     let mut row = vec![0; dim];
     for j in 0..dim {
-        if i == j {
+        if index == j {
             continue;
         }
-        let mut max = dist[i][j];
+        let mut max = dist[index][j];
         for k in 0..dim {
-            if dist[i][k] == 0 || dist[k][j] == 0 {
+            if dist[index][k] == 0 || dist[k][j] == 0 {
                 continue;
             }
-            let sum = dist[i][k] + dist[k][j];
+            let sum = dist[index][k] + dist[k][j];
             if sum > max {
                 max = sum
             }
