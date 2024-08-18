@@ -2,15 +2,13 @@ use std::{
     cmp::min,
     collections::{hash_map::Entry, HashMap},
     io::{stdin, BufRead, BufReader, Error},
+    sync::Arc,
     thread,
 };
 
-// use tokio::task::JoinSet;
-
 /// Reads an ordered list of words from stdin and prints the determined
 /// character sort order
-#[tokio::main]
-async fn main() {
+fn main() {
     let words = read_words(stdin().lock()).expect("read words");
     // println!("{:?}", words);
     println!("{:?}", lexical_order(&words).expect("sorted"));
@@ -30,7 +28,7 @@ fn lexical_order(words: &[String]) -> Result<Vec<char>, String> {
     let mut dist = adjacency(&indexed, dim);
     let mut pow = 1;
     while pow < dim {
-        dist = maxplus(&dist);
+        dist = maxplus(dist);
         pow <<= 1;
     }
     Ok(restore_chars(&sorted_indices(&dist)?, &chars))
@@ -68,7 +66,7 @@ fn lexical_order_test() {
 }
 
 /// Given a list of words, converts each char to an index into a list of chars.
-/// Returns the indices and the indexed list of chars.
+/// Returns the sequences of indices and the indexed list of chars.
 fn index_chars(words: &[String]) -> (Vec<Vec<usize>>, Vec<char>) {
     let mut char_map = HashMap::new();
     let mut indexed = Vec::with_capacity(words.len());
@@ -121,27 +119,38 @@ fn adjacency(indexed: &[Vec<usize>], dim: usize) -> Vec<Vec<usize>> {
     adj
 }
 
-/// Returns max-plus product of the given distance matrix
-fn maxplus(dist: &[Vec<usize>]) -> Vec<Vec<usize>> {
+/// Returns max-plus product of the given distance matrix.
+/// Spawns threads to process rows in parallel.
+fn maxplus(dist: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
     let dim = dist.len();
-    // let mut prod = vec![vec![0; dim]; dim];
-    let num_chunks = thread::available_parallelism().unwrap().get();
+    let num_chunks = thread::available_parallelism()
+        .expect("available parallelism")
+        .get();
+    // Each chunk contains dim.div_ceil(num_chunks) rows
     let chunk_size = (dim + num_chunks - 1) / num_chunks;
-    // let mut set = JoinSet::<Vec<(usize, Vec<usize>)>>::new();
-    let mut rows = Vec::with_capacity(dim);
+    // println!("dim {dim}, num_chunks {num_chunks}, chunk_size {chunk_size}");
+    let mut handles = Vec::with_capacity(num_chunks);
+    let dist = Arc::new(dist);
     for i in (0..dim).step_by(chunk_size) {
         let j = min(i + chunk_size, dim);
-        for k in i..j {
-            rows.push((k, maxplus_row(dist, k)));
-        }
+        let dist = dist.clone();
+        handles.push(thread::spawn(move || {
+            let mut chunk = Vec::with_capacity(j - i);
+            for k in i..j {
+                chunk.push(maxplus_row(&dist, k));
+            }
+            chunk
+        }));
     }
-    let mut prod = vec![vec![0; dim]; dim]; // TODO
-    // while let Some(res) = set.join_next().await { }
-    rows.into_iter().for_each(|p| prod[p.0] = p.1);
+    let mut prod = Vec::with_capacity(dim);
+    for handle in handles {
+        prod.extend(handle.join().expect("chunk received"));
+    }
     prod
 }
 
 /// Returns one row of the max-plus product of the given distance matrix
+#[allow(clippy::needless_range_loop)]
 fn maxplus_row(dist: &[Vec<usize>], index: usize) -> Vec<usize> {
     let dim = dist.len();
     let mut row = vec![0; dim];
@@ -164,7 +173,7 @@ fn maxplus_row(dist: &[Vec<usize>], index: usize) -> Vec<usize> {
     row
 }
 
-// Index usize::MAX is a reserved to designate an unranked element
+// Index usize::MAX is a reserved to identity an unranked element
 const UNRANKED: usize = usize::MAX;
 
 /// Returns row indices ordered by the longest distance found in each row
