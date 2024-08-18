@@ -1,28 +1,28 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    io::{stdin, BufRead, BufReader},
+    io::{stdin, BufRead, BufReader, Error},
 };
 
 /// Reads an ordered list of words from stdin and prints the determined
 /// character sort order
 fn main() {
-    let words = read_words(stdin().lock());
+    let words = read_words(stdin().lock()).expect("read words");
     println!("{:?}", words);
-    let (slices, chars) = index_chars(words);
+    let (slices, chars) = index_chars(&words);
     for slice in slices {
-        println!("{:?}", String::from_iter(restore_chars(slice, &chars)));
+        println!("{:?}", String::from_iter(restore_chars(&slice, &chars)));
     }
 }
 
 // Returns words read from input
-fn read_words<R: BufRead>(input: R) -> Vec<String> {
+fn read_words<R: BufRead>(input: R) -> Result<Vec<String>, Error> {
     let reader = BufReader::new(input);
-    reader.lines().map(|s| s.expect("input lines")).collect()
+    reader.lines().collect()
 }
 
 /// Receives a list of words that are sorted according to an unknown
 /// character precedence and returns their characters in the determined order
-fn _lexical_order(words: Vec<String>) -> Vec<char> {
+fn _lexical_order(words: &[String]) -> Vec<char> {
     let (slices, chars) = index_chars(words);
     let dim = chars.len();
     let mut dist = _adjacency(slices, dim);
@@ -31,18 +31,19 @@ fn _lexical_order(words: Vec<String>) -> Vec<char> {
         dist = _maxplus(dist);
         pow <<= 1;
     }
-    restore_chars(_sorted_indices(dist), &chars)
+    restore_chars(&_sorted_indices(dist), &chars)
 }
 
 /// Given a list of words, converts each char to an index into a list of chars.
 /// Returns the indices and the indexed list of chars.
-fn index_chars(words: Vec<String>) -> (Vec<Vec<usize>>, Vec<char>) {
+fn index_chars(words: &[String]) -> (Vec<Vec<usize>>, Vec<char>) {
     let mut char_map = HashMap::new();
     let mut slices = Vec::with_capacity(words.len());
     let mut chars = Vec::new();
     for word in words {
-        let mut indices = Vec::new();
-        for c in word.chars() {
+        let word_chars = word.chars().collect::<Vec<_>>();
+        let mut indices = Vec::with_capacity(word_chars.len());
+        for c in word_chars {
             let index;
             match char_map.entry(c) {
                 Entry::Vacant(entry) => {
@@ -63,8 +64,8 @@ fn index_chars(words: Vec<String>) -> (Vec<Vec<usize>>, Vec<char>) {
 
 /// Given a list of indices and an indexed list of chars,
 /// returns list of chars
-fn restore_chars(indices: Vec<usize>, chars: &[char]) -> Vec<char> {
-    indices.into_iter().map(|index| chars[index]).collect()
+fn restore_chars(indices: &[usize], chars: &[char]) -> Vec<char> {
+    indices.iter().map(|index| chars[*index]).collect()
 }
 
 /// Returns adjacency matrix given sorted list of slices containing
